@@ -35,8 +35,6 @@ func TestAccMailgunDomainCredential_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"mailgun_domain_credential.foobar", "region", "us"),
 				),
-				// due to Mailgun Client API limitation (unable to retrieve secrets)
-				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
@@ -65,8 +63,6 @@ func TestAccMailgunDomainCredential_Update(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"mailgun_domain_credential.foobar", "region", "us"),
 				),
-				// due to Mailgun Client API limitation (unable to retrieve secrets)
-				ExpectNonEmptyPlan: true,
 			},
 			{
 				Config: testAccCheckMailgunCredentialConfigUpdate(domain),
@@ -81,8 +77,6 @@ func TestAccMailgunDomainCredential_Update(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"mailgun_domain_credential.foobar", "region", "us"),
 				),
-				// due to Mailgun Client API limitation (unable to retrieve secrets)
-				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
@@ -95,26 +89,32 @@ func testAccCheckMailgunCrendentialDestroy(s *terraform.State) error {
 			continue
 		}
 
-		client, _ := testAccProvider.Meta().(*Config).GetClientForDomain(rs.Primary.Attributes["region"], rs.Primary.Attributes["domain"])
+		client, err := testAccProvider.Meta().(*Config).GetClientForDomain(rs.Primary.Attributes["region"], rs.Primary.Attributes["domain"])
 
-		itCredentials := client.ListCredentials(nil)
+		resp, err := client.GetDomain(context.Background(), rs.Primary.Attributes["domain"])
+		if err == nil {
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
+			itCredentials := client.ListCredentials(nil)
 
-		var page []mailgun.Credential
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
 
-		for itCredentials.Next(ctx, &page) {
+			var page []mailgun.Credential
 
-			for _, c := range page {
-				if c.Login == rs.Primary.ID {
-					return fmt.Errorf("The credential '%s' found! Created at: %s", rs.Primary.ID, c.CreatedAt.String())
+			for itCredentials.Next(ctx, &page) {
+
+				for _, c := range page {
+					if c.Login == rs.Primary.ID {
+						return fmt.Errorf("The credential '%s' found! Created at: %s", rs.Primary.ID, c.CreatedAt.String())
+					}
 				}
 			}
-		}
 
-		if err := itCredentials.Err(); err != nil {
-			return err
+			if err := itCredentials.Err(); err != nil {
+				return err
+			}
+
+			return fmt.Errorf("Domain still exists: %#v", resp)
 		}
 	}
 
@@ -163,7 +163,6 @@ func testAccCheckMailgunCredentialConfig(domain string) string {
 resource "mailgun_domain" "foobar" {
     name = "` + domain + `"
 	spam_action = "disabled"
-	smtp_password = "supersecretpassword1234"
 	region = "us"
     wildcard = true
 }
@@ -181,7 +180,6 @@ func testAccCheckMailgunCredentialConfigUpdate(domain string) string {
 resource "mailgun_domain" "foobar" {
     name = "` + domain + `"
 	spam_action = "disabled"
-	smtp_password = "supersecretpassword1234"
 	region = "us"
     wildcard = true
 }
